@@ -78,7 +78,8 @@ extern "C" {
  *
  * libevdev does not handle the file descriptors directly, it merely uses
  * them. The caller is responsible for opening the file descriptors, setting
- * them to O_NONBLOCK and handling permissions.
+ * them to O_NONBLOCK and handling permissions. A caller should drain any
+ * events pending on the file descriptor before passing it to libevdev.
  *
  * Where does libevdev sit?
  * ========================
@@ -654,9 +655,9 @@ extern "C" {
 /**
  * @defgroup bits Querying device capabilities
  *
- * Abstraction functions to handle device capabilities, specificially
+ * Abstraction functions to handle device capabilities, specifically
  * device properties such as the name of the device and the bits
- * representing the events suppported by this device.
+ * representing the events supported by this device.
  *
  * The logical state returned may lag behind the physical state of the device.
  * libevdev queries the device state on libevdev_set_fd() and then relies on
@@ -680,14 +681,14 @@ extern "C" {
  * The Linux kernel requires all axes on a device to have a semantic
  * meaning, matching the axis names in linux/input.h. Some devices merely
  * export a number of axes beyond the available axis list. For those
- * devices, the multitouch information is invalid. Specfically, if a device
+ * devices, the multitouch information is invalid. Specifically, if a device
  * provides the ABS_MT_SLOT axis AND also the (ABS_MT_SLOT - 1) axis, the
  * device is not treated as multitouch device. No slot information is
  * available and the ABS_MT axis range for these devices is treated as all
  * other EV_ABS axes.
  *
  * Note that because of limitations in the kernel API, such fake multitouch
- * devices can not be reliably synched after a SYN_DROPPED event. libevdev
+ * devices can not be reliably synced after a SYN_DROPPED event. libevdev
  * ignores all ABS_MT axis values during the sync process and instead
  * relies on the device to send the current axis value with the first event
  * after SYN_DROPPED.
@@ -793,6 +794,9 @@ int libevdev_new_from_fd(int fd, struct libevdev **dev);
  *
  * Clean up and free the libevdev struct. After completion, the <code>struct
  * libevdev</code> is invalid and must not be used.
+ *
+ * Note that calling libevdev_free() does not close the file descriptor
+ * currently asssociated with this instance.
  *
  * @param dev The evdev device
  *
@@ -955,7 +959,7 @@ enum libevdev_grab_mode {
  * @param dev The evdev device, already initialized with libevdev_set_fd()
  * @param grab If true, grab the device. Otherwise ungrab the device.
  *
- * @return 0 if the device was successfull grabbed or ungrabbed, or a
+ * @return 0 if the device was successfully grabbed or ungrabbed, or a
  * negative errno in case of failure.
  */
 int libevdev_grab(struct libevdev *dev, enum libevdev_grab_mode grab);
@@ -971,8 +975,17 @@ int libevdev_grab(struct libevdev *dev, enum libevdev_grab_mode grab);
  * you need to change the fd after closing and re-opening the same device, use
  * libevdev_change_fd().
  *
+ * A caller should ensure that any events currently pending on the fd are
+ * drained before the file descriptor is passed to libevdev for
+ * initialization. Due to how the kernel's ioctl handling works, the initial
+ * device state will reflect the current device state *after* applying all
+ * events currently pending on the fd. Thus, if the fd is not drained, the
+ * state visible to the caller will be inconsistent with the events
+ * immediately available on the device. This does not affect state-less
+ * events like EV_REL.
+ *
  * Unless otherwise specified, libevdev function behavior is undefined until
- * a successfull call to libevdev_set_fd().
+ * a successful call to libevdev_set_fd().
  *
  * @param dev The evdev device
  * @param fd The file descriptor for the device
@@ -1031,7 +1044,6 @@ int libevdev_change_fd(struct libevdev* dev, int fd);
  * @note This function may be called before libevdev_set_fd().
  */
 int libevdev_get_fd(const struct libevdev* dev);
-
 
 /**
  * @ingroup events
@@ -1786,7 +1798,7 @@ int libevdev_disable_event_type(struct libevdev *dev, unsigned int type);
  * The last argument depends on the type and code:
  * - If type is EV_ABS, data must be a pointer to a struct input_absinfo
  *   containing the data for this axis.
- * - If type is EV_REP, daat must be a pointer to a int containing the data
+ * - If type is EV_REP, data must be a pointer to a int containing the data
  *   for this axis
  * - For all other types, the argument must be NULL.
  *
@@ -1855,7 +1867,6 @@ int libevdev_disable_event_code(struct libevdev *dev, unsigned int type, unsigne
  * @see libevdev_enable_event_code
  */
 int libevdev_kernel_set_abs_info(struct libevdev *dev, unsigned int code, const struct input_absinfo *abs);
-
 
 /**
  * @ingroup kernel
@@ -2151,7 +2162,6 @@ int libevdev_property_from_name_n(const char *name, size_t len);
  * @see libevdev_get_event_value
  */
 int libevdev_get_repeat(const struct libevdev *dev, int *delay, int *period);
-
 
 /********* DEPRECATED SECTION *********/
 #if defined(__GNUC__) && __GNUC__ >= 4

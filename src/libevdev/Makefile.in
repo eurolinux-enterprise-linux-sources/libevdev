@@ -216,6 +216,7 @@ AUTOCONF = @AUTOCONF@
 AUTOHEADER = @AUTOHEADER@
 AUTOMAKE = @AUTOMAKE@
 AWK = @AWK@
+CAT = @CAT@
 CC = @CC@
 CCDEPMODE = @CCDEPMODE@
 CFLAGS = @CFLAGS@
@@ -255,6 +256,7 @@ LIBTOOL = @LIBTOOL@
 LIPO = @LIPO@
 LN_S = @LN_S@
 LTLIBOBJS = @LTLIBOBJS@
+LT_SYS_LIBRARY_PATH = @LT_SYS_LIBRARY_PATH@
 MAKEINFO = @MAKEINFO@
 MANIFEST_TOOL = @MANIFEST_TOOL@
 MKDIR_P = @MKDIR_P@
@@ -354,6 +356,7 @@ libevdev_la_SOURCES = \
                    libevdev-uinput-int.h \
                    libevdev.c \
                    libevdev-names.c \
+		   ../include/linux/input-event-codes.h \
 		   ../include/linux/input.h \
 		   ../include/linux/uinput.h
 
@@ -716,7 +719,7 @@ uninstall-am: uninstall-libLTLIBRARIES \
 
 
 event-names.h: Makefile make-event-names.py
-	$(PYTHON) $(srcdir)/make-event-names.py $(top_srcdir)/include/linux/input.h  > $@
+	$(CAT) $(top_srcdir)/include/linux/input.h $(top_srcdir)/include/linux/input-event-codes.h | $(PYTHON) $(srcdir)/make-event-names.py  > $@
 
 # Tell versions [3.59,3.63) of GNU make to not export all variables.
 # Otherwise a system limit (for SysV at least) may be exceeded.

@@ -43,8 +43,11 @@
 
 struct measurements {
 	int distance;
-	double frequency;
-	uint32_t ms;
+	double max_frequency;
+	double *frequencies;
+	size_t frequencies_sz;
+	size_t nfrequencies;
+	uint64_t us;
 };
 
 static int
@@ -58,16 +61,31 @@ usage(void) {
 	return 1;
 }
 
-static inline uint32_t
-tv2ms(const struct timeval *tv)
+static inline uint64_t
+tv2us(const struct timeval *tv)
 {
-	return tv->tv_sec * 1000 + tv->tv_usec/1000;
+	return tv->tv_sec * 1000000 + tv->tv_usec;
 }
 
 static inline double
-get_frequency(double last, double current)
+get_frequency(uint64_t last, uint64_t current)
 {
-	return 1000.0/(current - last);
+	return 1000000.0/(current - last);
+}
+
+static inline void
+push_frequency(struct measurements *m, double freq)
+{
+	if (m->nfrequencies == m->frequencies_sz) {
+		m->frequencies_sz += 100;
+		m->frequencies = realloc(m->frequencies,
+					 m->frequencies_sz * sizeof *m->frequencies);
+		if (!m->frequencies)
+			abort();
+	}
+
+	m->frequencies[m->nfrequencies] = freq;
+	m->nfrequencies++;
 }
 
 static int
@@ -89,7 +107,7 @@ print_current_values(const struct measurements *m)
 	progress = (progress + 1) % 4;
 
 	printf("\rCovered distance in device units: %8d at frequency %3.1fHz 	%c",
-	       abs(m->distance), m->frequency, status);
+	       abs(m->distance), m->max_frequency, status);
 
 	return 0;
 }
@@ -98,18 +116,19 @@ static int
 handle_event(struct measurements *m, const struct input_event *ev)
 {
 	if (ev->type == EV_SYN) {
-		const int idle_reset = 3000; /* ms */
-		uint32_t last_millis = m->ms;
+		const int idle_reset = 3000000; /* us */
+		uint64_t last_us = m->us;
 
-		m->ms = tv2ms(&ev->time);
+		m->us = tv2us(&ev->time);
 
 		/* reset after pause */
-		if (last_millis + idle_reset < m->ms) {
-			m->frequency = 0.0;
+		if (last_us + idle_reset < m->us) {
+			m->max_frequency = 0.0;
 			m->distance = 0;
 		} else {
-			double freq = get_frequency(last_millis, m->ms);
-			m->frequency = max(freq, m->frequency);
+			double freq = get_frequency(last_us, m->us);
+			push_frequency(m, freq);
+			m->max_frequency = max(freq, m->max_frequency);
 			return print_current_values(m);
 		}
 
@@ -165,12 +184,29 @@ mainloop(struct libevdev *dev, struct measurements *m) {
 	return 0;
 }
 
+static inline double
+mean_frequency(struct measurements *m)
+{
+	int idx;
+
+	idx = m->nfrequencies/2;
+	return m->frequencies[idx];
+}
+
 static void
 print_summary(struct measurements *m)
 {
 	int res;
+	int max_freq = (int)m->max_frequency,
+	    mean_freq = (int)mean_frequency(m);
 
-	printf("Estimated sampling frequency: %dHz\n", (int)m->frequency);
+	printf("Estimated sampling frequency: %dHz (mean %dHz)\n",
+	       max_freq, mean_freq);
+
+	if (max_freq > mean_freq * 1.3)
+		printf("WARNING: Max frequency is more than 30%% higher "
+		       "than mean frequency. Manual verification required!\n");
+
 	printf("To calculate resolution, measure physical distance covered\n"
 	       "and look up the matching resolution in the table below\n");
 
@@ -185,7 +221,7 @@ print_summary(struct measurements *m)
 	}
 	printf("If your resolution is not in the list, calculate it with:\n"
 	       "\tresolution=%d/inches, or\n"
-	       "\tresolution=%d/(mm * 25.4)\n", m->distance, m->distance);
+	       "\tresolution=%d * 25.4/mm\n", m->distance, m->distance);
 }
 
 static inline const char*
@@ -212,7 +248,7 @@ main (int argc, char **argv) {
 	int fd;
 	const char *path;
 	struct libevdev *dev;
-	struct measurements measurements = {0, 0, 0};
+	struct measurements measurements = {0};
 
 	if (argc < 2)
 		return usage();
@@ -259,7 +295,7 @@ main (int argc, char **argv) {
 	       libevdev_get_id_vendor(dev),
 	       libevdev_get_id_product(dev),
 	       libevdev_get_name(dev),
-	       (int)measurements.frequency);
+	       (int)measurements.max_frequency);
 
 	libevdev_free(dev);
 	close(fd);

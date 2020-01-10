@@ -1,5 +1,5 @@
 Name:           libevdev
-Version:        1.4.1
+Version:        1.5.6
 Release:        1%{?dist}
 Summary:        Kernel Evdev Device Wrapper Library
 
@@ -65,6 +65,9 @@ rm -f %{buildroot}%{_libdir}/*.la
 %{_bindir}/libevdev-tweak-device
 
 %changelog
+* Tue Jan 17 2017 Peter Hutterer <peter.hutterer@redhat.com> 1.5.6-1
+- libevdev 1.5.6 (#1401754)
+
 * Wed Apr 08 2015 Peter Hutterer <peter.hutterer@redhat.com> 1.4.1-1
 - libevdev 1.4.1
 

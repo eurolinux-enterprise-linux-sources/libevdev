@@ -21,7 +21,7 @@
 AC_PREREQ([2.62])
 
 AC_INIT([libevdev],
-        [1.4.1],
+        [1.5.6],
         [https://bugs.freedesktop.org/enter_bug.cgi?product=libevdev],
         [libevdev],
         [http://freedesktop.org/wiki/Software/libevdev/])
@@ -42,7 +42,7 @@ AM_INIT_AUTOMAKE([1.11 foreign no-dist-gzip dist-xz])
 # - If binary compatibility has been broken (eg removed or changed interfaces)
 #   change to C+1:0:0
 # - If the interface is the same as the previous version, change to C:R+1:A
-LIBEVDEV_LT_VERSION=3:7:1
+LIBEVDEV_LT_VERSION=3:18:1
 AC_SUBST(LIBEVDEV_LT_VERSION)
 
 
@@ -66,6 +66,8 @@ if test "x$lt_cv_prog_gnu_ld" = "xyes"; then
 fi
 AC_SUBST([GNU_LD_FLAGS], $with_ldflags)
 
+AC_CHECK_LIB([m], [round])
+
 PKG_PROG_PKG_CONFIG()
 PKG_CHECK_MODULES(CHECK, [check >= 0.9.9], [HAVE_CHECK="yes"], [HAVE_CHECK="no"])
 if test "x$HAVE_CHECK" = "xyes"; then
@@ -76,6 +78,11 @@ fi
 AM_CONDITIONAL(HAVE_VALGRIND, [test "x$VALGRIND" != "x"])
 AM_CONDITIONAL(ENABLE_RUNTIME_TESTS, [test "x$HAVE_CHECK" = "xyes"])
 AM_CONDITIONAL(ENABLE_STATIC_LINK_TEST, [test "x$enable_static" = "xyes"])
+
+AC_ARG_ENABLE([test-run],
+	       AS_HELP_STRING([--enable-test-run], [For internal use only]),
+	       [run_tests="$enableval"], [run_tests="yes"])
+AM_CONDITIONAL(RUN_TESTS, [test "x$run_tests" = "xyes"])
 
 with_cflags=""
 if test "x$GCC" = "xyes"; then
@@ -125,6 +132,7 @@ AC_SUBST([GCOV_LDFLAGS])
 AC_MSG_RESULT([$enable_gcov])
 
 AM_PATH_PYTHON([2.6])
+AC_PATH_PROG(CAT, [cat])
 
 # nm to check for leaking symbols in the static library
 AC_PATH_PROG(NM, [nm])
@@ -160,6 +168,7 @@ AC_MSG_RESULT([
 
 	       Build documentation		${have_doxygen}
 	       Enable unit-tests		${HAVE_CHECK}
+	       Run unit-tests			${run_tests}
 	       Enable profiling			${enable_gcov}
 	       Static library symbol check	${static_symbol_leaks_test}
 	       ])

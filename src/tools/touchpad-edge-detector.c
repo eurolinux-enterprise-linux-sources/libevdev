@@ -30,6 +30,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <limits.h>
+#include <math.h>
 #include <poll.h>
 #include <signal.h>
 #include <stdint.h>
@@ -43,15 +44,20 @@
 
 static int
 usage(void) {
-	printf("Usage: %s /dev/input/event0\n", program_invocation_short_name);
+	printf("Usage: %s 12x34 /dev/input/event0\n", program_invocation_short_name);
 	printf("\n");
 	printf("This tool reads the touchpad events from the kernel and calculates\n "
-	       "the minimum and maximum for the x and y coordinates, respectively.\n");
+	       "the minimum and maximum for the x and y coordinates, respectively.\n"
+	       "The first argument is the physical size of the touchpad in mm.\n");
 	return 1;
 }
 
 struct dimensions {
 	int top, bottom, left, right;
+};
+
+struct size {
+	int w, h;
 };
 
 static int
@@ -136,17 +142,115 @@ mainloop(struct libevdev *dev, struct dimensions *dim) {
 	return 0;
 }
 
+static inline void
+pid_vid_matchstr(struct libevdev *dev, char *match, size_t sz)
+{
+	snprintf(match, sz, "input:b%04Xv%04Xp%04X",
+		libevdev_get_id_bustype(dev),
+		libevdev_get_id_vendor(dev),
+		libevdev_get_id_product(dev));
+}
+
+static inline void
+dmi_matchstr(struct libevdev *dev, char *match, size_t sz)
+{
+	char modalias[PATH_MAX];
+	FILE *fp;
+
+	fp = fopen("/sys/class/dmi/id/modalias", "r");
+	if (!fp || fgets(modalias, sizeof(modalias), fp) == NULL) {
+		sprintf(match, "ERROR READING DMI MODALIAS");
+		if (fp)
+			fclose(fp);
+		return;
+	}
+
+	fclose(fp);
+
+	modalias[strlen(modalias) - 1] = '\0'; /* drop \n */
+	snprintf(match, sz, "name:%s:%s", libevdev_get_name(dev), modalias);
+
+	return;
+}
+
+static void
+print_udev_override_rule(struct libevdev *dev,
+			 const struct dimensions *dim,
+			 const struct size *size) {
+	const struct input_absinfo *x, *y;
+	char match[PATH_MAX];
+	int w, h;
+	int xres, yres;
+
+	x = libevdev_get_abs_info(dev, ABS_X);
+	y = libevdev_get_abs_info(dev, ABS_Y);
+	w = dim->right - dim->left;
+	h = dim->bottom - dim->top;
+	xres = round((double)w/size->w);
+	yres = round((double)h/size->h);
+
+	if (x->resolution && y->resolution) {
+		int width = x->maximum - x->minimum,
+		    height = y->maximum - y->minimum;
+		printf("Touchpad size as listed by the kernel: %dx%dmm\n",
+		       width/x->resolution, height/y->resolution);
+	} else {
+		printf("Touchpad has no resolution, size unknown\n");
+	}
+
+	printf("User-specified touchpad size: %dx%dmm\n", size->w, size->h);
+	printf("Calculated ranges: %d/%d\n", w, h);
+	printf("\n");
+	printf("Suggested udev rule:\n");
+
+	switch(libevdev_get_id_bustype(dev)) {
+	case BUS_USB:
+	case BUS_BLUETOOTH:
+		pid_vid_matchstr(dev, match, sizeof(match));
+		break;
+	default:
+		dmi_matchstr(dev, match, sizeof(match));
+		break;
+	}
+
+	printf("# <Laptop model description goes here>\n"
+	       "evdev:%s*\n"
+	       " EVDEV_ABS_00=%d:%d:%d\n"
+	       " EVDEV_ABS_01=%d:%d:%d\n",
+	       match,
+	       dim->left, dim->right, xres,
+	       dim->top, dim->bottom, yres);
+	if (libevdev_has_event_code(dev, EV_ABS, ABS_MT_POSITION_X))
+		printf(" EVDEV_ABS_35=%d:%d:%d\n"
+		       " EVDEV_ABS_36=%d:%d:%d\n",
+		       dim->left, dim->right, xres,
+		       dim->top, dim->bottom, yres);
+}
+
 int main (int argc, char **argv) {
 	int rc;
 	int fd;
 	const char *path;
 	struct libevdev *dev;
 	struct dimensions dim;
+	struct size size;
 
-	if (argc < 2)
+	if (argc < 3)
 		return usage();
 
-	path = argv[1];
+	if (sscanf(argv[1], "%dx%d", &size.w, &size.h) != 2 ||
+	    size.w <= 0 || size.h <= 0)
+		return usage();
+
+	if (size.w < 30 || size.h < 30) {
+		fprintf(stderr,
+			"%dx%dmm is too small for a touchpad.\n"
+			"Please specify the touchpad size in mm.\n",
+			size.w, size.h);
+		return 1;
+	}
+
+	path = argv[2];
 	if (path[0] == '-')
 		return usage();
 
@@ -169,6 +273,13 @@ int main (int argc, char **argv) {
 	}
 	libevdev_grab(dev, LIBEVDEV_UNGRAB);
 
+	if (!libevdev_has_event_code(dev, EV_ABS, ABS_X) ||
+	    !libevdev_has_event_code(dev, EV_ABS, ABS_Y)) {
+		fprintf(stderr, "Error: this device does not have abs axes\n");
+		rc = EXIT_FAILURE;
+		goto out;
+	}
+
 	dim.left = INT_MAX;
 	dim.right = INT_MIN;
 	dim.top = INT_MAX;
@@ -185,12 +296,13 @@ int main (int argc, char **argv) {
 	setbuf(stdout, NULL);
 
 	rc = mainloop(dev, &dim);
+	printf("\n\n");
 
-	printf("\n");
+	print_udev_override_rule(dev, &dim, &size);
 
+out:
 	libevdev_free(dev);
 	close(fd);
 
 	return rc;
 }
-
